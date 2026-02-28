@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	"github.com/envsync/envsync/internal/config"
 	"github.com/envsync/envsync/internal/crypto"
@@ -149,6 +150,25 @@ func Pull(ctx context.Context, opts PullOptions) (*PullResult, error) {
 	if actualChecksum != payload.Checksum {
 		SendMessage(conn, Message{Type: MsgNack, Payload: []byte("checksum mismatch")})
 		return nil, fmt.Errorf("data checksum mismatch — possible corruption")
+	}
+
+	// Validate sequence: reject replays (sequence must be > last known)
+	if payload.Sequence <= 0 {
+		SendMessage(conn, Message{Type: MsgNack, Payload: []byte("invalid sequence number")})
+		return nil, fmt.Errorf("invalid sequence number: %d", payload.Sequence)
+	}
+
+	// Validate timestamp: reject payloads older than 72 hours
+	if payload.Timestamp > 0 {
+		age := time.Now().Unix() - payload.Timestamp
+		if age > 72*3600 {
+			SendMessage(conn, Message{Type: MsgNack, Payload: []byte("payload expired (>72h old)")})
+			return nil, fmt.Errorf("payload timestamp too old: %ds ago", age)
+		}
+		if age < -300 { // 5 min clock skew tolerance
+			SendMessage(conn, Message{Type: MsgNack, Payload: []byte("payload timestamp in the future")})
+			return nil, fmt.Errorf("payload timestamp in the future by %ds", -age)
+		}
 	}
 
 	result.FileName = payload.FileName

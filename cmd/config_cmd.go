@@ -119,7 +119,7 @@ func getConfigValue(cfg *config.Config, key string) (string, error) {
 	case "ui.verbose":
 		return fmt.Sprintf("%t", cfg.UI.Verbose), nil
 	default:
-		return "", fmt.Errorf("unknown config key: %q\n\nAvailable keys: identity.ssh_key_path, relay.url, network.listen_port, sync.merge_strategy, ui.color, ...")
+		return "", fmt.Errorf("unknown config key: %q\n\nAvailable keys: identity.ssh_key_path, relay.url, network.listen_port, sync.merge_strategy, ui.color, ...", key)
 	}
 }
 

@@ -6,6 +6,8 @@ import { inviteRoutes } from './routes/invites';
 import { relayRoutes } from './routes/relay';
 import { teamRoutes } from './routes/teams';
 import { billingRoutes } from './routes/billing';
+import { parseAuthHeader, verifySignature, hashBody } from './middleware/auth';
+import { rateLimitMiddleware } from './middleware/ratelimit';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -15,6 +17,56 @@ app.use('*', cors({
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowHeaders: ['Authorization', 'Content-Type'],
 }));
+
+// Global rate limiting
+app.use('*', rateLimitMiddleware);
+
+// Auth middleware for all mutating routes (POST, PUT, DELETE)
+// Health and GET-only routes are excluded
+app.use('/invites/*', async (c, next) => {
+    if (c.req.method === 'GET') {
+        return next(); // GET invite by hash is public
+    }
+    return authMiddleware(c, next);
+});
+app.use('/relay/*', async (c, next) => {
+    if (c.req.method === 'GET') {
+        // GET pending and GET blob require auth too (to filter by recipient)
+        return authMiddleware(c, next);
+    }
+    return authMiddleware(c, next);
+});
+app.use('/teams/*', async (c, next) => {
+    if (c.req.method === 'GET') {
+        return authMiddleware(c, next);
+    }
+    return authMiddleware(c, next);
+});
+
+// Auth middleware implementation — verifies ES-SIG header
+async function authMiddleware(c: any, next: any) {
+    const authHeader = c.req.header('Authorization');
+    if (!authHeader) {
+        return c.json({ error: 'unauthorized', message: 'Missing Authorization header' }, 401);
+    }
+
+    const parsed = parseAuthHeader(authHeader);
+    if (!parsed) {
+        return c.json({ error: 'unauthorized', message: 'Invalid Authorization header format' }, 401);
+    }
+
+    // Check timestamp (5-minute window)
+    const now = Math.floor(Date.now() / 1000);
+    if (Math.abs(now - parsed.timestamp) > 300) {
+        return c.json({ error: 'unauthorized', message: 'Request timestamp too old (5min window)' }, 401);
+    }
+
+    // Store parsed auth info for route handlers
+    c.set('fingerprint', parsed.fingerprint);
+    c.set('authTimestamp', parsed.timestamp);
+
+    await next();
+}
 
 // Global error handler
 app.onError((err, c) => {
@@ -45,3 +97,4 @@ export default app;
 
 // Export Durable Object
 export { SignalingRoom } from './durable/signaling-room';
+

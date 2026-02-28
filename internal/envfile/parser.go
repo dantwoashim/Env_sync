@@ -50,6 +50,15 @@ type EnvFile struct {
 
 // Parse parses a .env file from a string, preserving comments, ordering, and blank lines.
 func Parse(content string) (*EnvFile, error) {
+	// Strip UTF-8 BOM if present
+	if strings.HasPrefix(content, "\xEF\xBB\xBF") {
+		content = content[3:]
+	}
+
+	// Normalize CRLF → LF
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+
 	env := &EnvFile{}
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	lineNum := 0
@@ -355,3 +364,71 @@ func (e *EnvFile) VariableCount() int {
 	}
 	return count
 }
+
+// Interpolate replaces ${VAR} and $VAR references in double-quoted values
+// with the values of other variables defined in the same file.
+// Single-quoted values are never interpolated (they are literal).
+// This is optional and must be called explicitly after Parse().
+func (e *EnvFile) Interpolate() {
+	vars := e.ToMap()
+
+	for i, entry := range e.Entries {
+		if entry.Type != EntryKeyValue || entry.Quote != QuoteDouble {
+			continue
+		}
+
+		value := entry.Value
+		// Replace ${VAR} patterns
+		result := interpolateValue(value, vars)
+		if result != value {
+			e.Entries[i].Value = result
+		}
+	}
+}
+
+// interpolateValue replaces ${VAR} and $VAR references in a value string.
+func interpolateValue(value string, vars map[string]string) string {
+	var result strings.Builder
+	i := 0
+	for i < len(value) {
+		if value[i] == '$' && i+1 < len(value) {
+			if value[i+1] == '{' {
+				// ${VAR} syntax
+				end := strings.Index(value[i:], "}")
+				if end > 0 {
+					varName := value[i+2 : i+end]
+					if v, ok := vars[varName]; ok {
+						result.WriteString(v)
+					} else {
+						result.WriteString(value[i : i+end+1])
+					}
+					i += end + 1
+					continue
+				}
+			} else if isVarNameChar(rune(value[i+1])) {
+				// $VAR syntax (no braces)
+				j := i + 1
+				for j < len(value) && isVarNameChar(rune(value[j])) {
+					j++
+				}
+				varName := value[i+1 : j]
+				if v, ok := vars[varName]; ok {
+					result.WriteString(v)
+				} else {
+					result.WriteString(value[i:j])
+				}
+				i = j
+				continue
+			}
+		}
+		result.WriteByte(value[i])
+		i++
+	}
+	return result.String()
+}
+
+// isVarNameChar returns true if the rune is valid in an env variable name.
+func isVarNameChar(r rune) bool {
+	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_'
+}
+

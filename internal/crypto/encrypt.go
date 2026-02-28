@@ -100,7 +100,11 @@ func Decrypt(data []byte, key [32]byte) ([]byte, error) {
 
 // EncryptForRecipient encrypts plaintext for a specific recipient using ephemeral ECDH.
 // Returns: ephemeral public key (32) + nonce (24) + ciphertext + tag (16).
+// Plaintext is padded to the nearest 1KB boundary to prevent traffic analysis.
 func EncryptForRecipient(plaintext []byte, recipientPublicKey [32]byte) (ephemeralPub [32]byte, encrypted []byte, err error) {
+	// Pad plaintext to nearest 1KB boundary (2-byte length prefix + data + padding)
+	padded := padTo1KB(plaintext)
+
 	// Generate ephemeral X25519 keypair
 	// Note: curve25519.X25519() clamps internally, no manual clamping needed.
 	var ephemeralPrivate [32]byte
@@ -141,7 +145,7 @@ func EncryptForRecipient(plaintext []byte, recipientPublicKey [32]byte) (ephemer
 	}
 
 	// Bind ephemeral public key as AAD to prevent key-substitution attacks
-	ciphertext := aead.Seal(nil, nonce, plaintext, ephPub[:])
+	ciphertext := aead.Seal(nil, nonce, padded, ephPub[:])
 
 	// Assemble: nonce + ciphertext
 	encrypted = make([]byte, 0, NonceSize+len(ciphertext))
@@ -182,9 +186,15 @@ func DecryptFromSender(encrypted []byte, ephemeralPublicKey [32]byte, recipientP
 	}
 
 	// AAD must match what was used during encryption (ephemeral public key)
-	plaintext, err := aead.Open(nil, nonce, ciphertext, ephemeralPublicKey[:])
+	padded, err := aead.Open(nil, nonce, ciphertext, ephemeralPublicKey[:])
 	if err != nil {
 		return nil, errors.New("decryption failed: wrong key, corrupted data, or not intended for this recipient")
+	}
+
+	// Remove 1KB boundary padding
+	plaintext, err := unpadFrom1KB(padded)
+	if err != nil {
+		return nil, fmt.Errorf("unpadding: %w", err)
 	}
 
 	return plaintext, nil
@@ -211,3 +221,38 @@ func curve25519Basepoint() []byte {
 	basepoint := [32]byte{9}
 	return basepoint[:]
 }
+
+// padTo1KB pads data to the nearest 1KB boundary for traffic analysis prevention.
+// Format: 2-byte big-endian length prefix + original data + zero padding.
+func padTo1KB(data []byte) []byte {
+	totalNeeded := 2 + len(data) // 2 bytes for length prefix + data
+	// Round up to nearest 1024 boundary
+	paddedLen := ((totalNeeded + 1023) / 1024) * 1024
+	if paddedLen < 1024 {
+		paddedLen = 1024
+	}
+
+	result := make([]byte, paddedLen)
+	// Write length as big-endian uint16 (max 65535 bytes)
+	if len(data) > 65535 {
+		// For very large payloads, skip padding
+		result = make([]byte, 2+len(data))
+	}
+	result[0] = byte(len(data) >> 8)
+	result[1] = byte(len(data))
+	copy(result[2:], data)
+	return result
+}
+
+// unpadFrom1KB removes 1KB boundary padding by reading the 2-byte length prefix.
+func unpadFrom1KB(padded []byte) ([]byte, error) {
+	if len(padded) < 2 {
+		return nil, errors.New("padded data too short")
+	}
+	dataLen := int(padded[0])<<8 | int(padded[1])
+	if 2+dataLen > len(padded) {
+		return nil, fmt.Errorf("data length %d exceeds padded buffer %d", dataLen, len(padded)-2)
+	}
+	return padded[2 : 2+dataLen], nil
+}
+
