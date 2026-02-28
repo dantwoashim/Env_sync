@@ -1,0 +1,84 @@
+{
+    "name": "envsync-vscode",
+    "displayName": "EnvSync",
+    "description": "Securely sync .env files between developers — right from VS Code",
+    "version": "1.0.0",
+    "publisher": "envsync",
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "keywords": [
+        "env",
+        "dotenv",
+        "sync",
+        "secrets",
+        "environment"
+    ],
+    "icon": "icon.png",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/envsync/envsync"
+    },
+    "activationEvents": [
+        "workspaceContains:.env"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "envsync.push",
+                "title": "EnvSync: Push"
+            },
+            {
+                "command": "envsync.pull",
+                "title": "EnvSync: Pull"
+            },
+            {
+                "command": "envsync.diff",
+                "title": "EnvSync: Diff"
+            },
+            {
+                "command": "envsync.audit",
+                "title": "EnvSync: View Audit Log"
+            },
+            {
+                "command": "envsync.peers",
+                "title": "EnvSync: View Peers"
+            }
+        ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "envsync",
+                    "title": "EnvSync",
+                    "icon": "icon.svg"
+                }
+            ]
+        },
+        "views": {
+            "envsync": [
+                {
+                    "id": "envsync.peers",
+                    "name": "Peers"
+                },
+                {
+                    "id": "envsync.audit",
+                    "name": "Recent Activity"
+                }
+            ]
+        }
+    },
+    "scripts": {
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "package": "vsce package"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.85.0",
+        "typescript": "^5.0.0",
+        "@vscode/vsce": "^2.0.0"
+    }
+}

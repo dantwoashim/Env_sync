@@ -1,0 +1,3 @@
+team_id = ""
+default_file = ".env"
+sync_strategy = "three-way"

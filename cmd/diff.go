@@ -1,0 +1,122 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/envsync/envsync/internal/crypto"
+	"github.com/envsync/envsync/internal/envfile"
+	"github.com/envsync/envsync/internal/store"
+	"github.com/envsync/envsync/internal/ui"
+	"github.com/spf13/cobra"
+)
+
+var diffCmd = &cobra.Command{
+	Use:   "diff [file]",
+	Short: "Show differences in .env files",
+	Long: `Compares the current .env file against the last synced version from the store.
+
+  envsync diff                  Diff current .env vs last backup
+  envsync diff --against other  Diff current .env vs another file`,
+	RunE: runDiff,
+}
+
+var diffAgainst string
+
+func runDiff(cmd *cobra.Command, args []string) error {
+	targetFile, _ := cmd.Flags().GetString("file")
+	if targetFile == "" {
+		targetFile = ".env"
+	}
+
+	// Read current file
+	currentData, err := os.ReadFile(targetFile)
+	if err != nil {
+		ui.RenderError(ui.ErrEnvFileNotFound(targetFile))
+		return nil
+	}
+
+	currentEnv, err := envfile.Parse(string(currentData))
+	if err != nil {
+		return fmt.Errorf("parsing %s: %w", targetFile, err)
+	}
+
+	// Determine what to compare against
+	var compareEnv *envfile.EnvFile
+	var compareLabel string
+
+	if diffAgainst != "" || len(args) > 0 {
+		// Compare against a specific file
+		compareFile := diffAgainst
+		if len(args) > 0 {
+			compareFile = args[0]
+		}
+
+		compareData, err := os.ReadFile(compareFile)
+		if err != nil {
+			ui.RenderError(ui.StructuredError{
+				Category:   ui.ErrFile,
+				Message:    fmt.Sprintf("Cannot read %s", compareFile),
+				Cause:      err.Error(),
+				Suggestion: "Check the file path",
+			})
+			return nil
+		}
+
+		compareEnv, err = envfile.Parse(string(compareData))
+		if err != nil {
+			return fmt.Errorf("parsing %s: %w", compareFile, err)
+		}
+		compareLabel = compareFile
+	} else {
+		// Try version store for last backup
+		kp, kpErr := loadIdentity()
+		if kpErr == nil {
+			key, keyErr := crypto.DeriveAtRestKey(kp.X25519Private[:])
+			if keyErr == nil {
+				vStore, storeErr := store.New(50)
+				if storeErr == nil {
+					projectHash := fmt.Sprintf("%x", key[:8])
+					latest, latestErr := vStore.Latest(projectHash)
+					if latestErr == nil && latest != nil {
+						restoredData, restoreErr := vStore.Restore(projectHash, latest.Sequence, key)
+						if restoreErr == nil {
+							compareEnv, _ = envfile.Parse(string(restoredData))
+							compareLabel = fmt.Sprintf("backup v%d (%s)", latest.Sequence, latest.Timestamp.Format("2006-01-02 15:04"))
+						}
+					}
+				}
+			}
+		}
+	}
+
+	ui.Header("EnvSync Diff")
+
+	if compareEnv == nil {
+		ui.Line(fmt.Sprintf("  File: %s (%d variables)", targetFile, currentEnv.VariableCount()))
+		ui.Blank()
+		ui.Line(ui.StyleDim.Render("  No previous version to compare against."))
+		ui.Line(ui.StyleDim.Render("  Run 'envsync backup' to create a baseline."))
+		ui.Blank()
+		return nil
+	}
+
+	ui.Line(fmt.Sprintf("  %s %s %s", targetFile, ui.StyleDim.Render(ui.IconArrow), compareLabel))
+	ui.Blank()
+
+	diff := envfile.Diff(compareEnv, currentEnv)
+
+	if !diff.HasChanges() {
+		ui.Success("Files are identical")
+	} else {
+		fmt.Print(ui.RenderDiff(diff))
+	}
+	ui.Blank()
+
+	return nil
+}
+
+func init() {
+	diffCmd.Flags().StringVar(&diffAgainst, "against", "", "Compare against a specific file")
+	rootCmd.AddCommand(diffCmd)
+}

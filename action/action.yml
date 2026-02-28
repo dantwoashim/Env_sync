@@ -1,0 +1,115 @@
+name: 'EnvSync - Sync Environment Variables'
+description: 'Securely inject .env variables from your EnvSync team into CI workflows'
+author: 'EnvSync'
+
+branding:
+  icon: 'lock'
+  color: 'purple'
+
+inputs:
+  service_key:
+    description: 'Base64-encoded service key (from ENVSYNC_SERVICE_KEY secret)'
+    required: true
+  team_id:
+    description: 'EnvSync team ID'
+    required: true
+  env_file:
+    description: 'Target .env file to pull'
+    required: false
+    default: '.env'
+  relay_url:
+    description: 'Relay server URL'
+    required: false
+    default: 'https://relay.envsync.dev'
+  mask_values:
+    description: 'Mask secret values in logs'
+    required: false
+    default: 'true'
+
+outputs:
+  env_count:
+    description: 'Number of environment variables injected'
+  pull_method:
+    description: 'Sync method used (relay/cache)'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install EnvSync
+      shell: bash
+      run: |
+        curl -fsSL https://envsync.dev/install.sh | bash
+        echo "EnvSync installed: $(envsync version --short 2>/dev/null || echo 'unknown')"
+
+    - name: Import service key
+      shell: bash
+      env:
+        ENVSYNC_SERVICE_KEY: ${{ inputs.service_key }}
+      run: |
+        echo "$ENVSYNC_SERVICE_KEY" | base64 -d > /tmp/envsync-service-key
+        chmod 600 /tmp/envsync-service-key
+
+    - name: Pull environment variables
+      shell: bash
+      run: |
+        # Pull .env from relay
+        envsync pull \
+          --service-key /tmp/envsync-service-key \
+          --team "${{ inputs.team_id }}" \
+          --file "${{ inputs.env_file }}" \
+          --relay "${{ inputs.relay_url }}" \
+          --quiet || {
+            echo "::warning::EnvSync pull failed. Check service key and team configuration."
+            exit 0
+          }
+
+    - name: Inject into environment
+      shell: bash
+      run: |
+        ENV_FILE="${{ inputs.env_file }}"
+        MASK="${{ inputs.mask_values }}"
+        COUNT=0
+
+        if [ ! -f "$ENV_FILE" ]; then
+          echo "::warning::No .env file found after pull"
+          exit 0
+        fi
+
+        while IFS= read -r line || [ -n "$line" ]; do
+          # Skip comments and blank lines
+          [[ "$line" =~ ^[[:space:]]*# ]] && continue
+          [[ -z "${line// }" ]] && continue
+
+          # Extract key=value (handle quoted values)
+          if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z_0-9]*)=(.*) ]]; then
+            key="${BASH_REMATCH[2]}"
+            value="${BASH_REMATCH[3]}"
+
+            # Strip surrounding quotes
+            value="${value#\"}"
+            value="${value%\"}"
+            value="${value#\'}"
+            value="${value%\'}"
+
+            # Inject into GITHUB_ENV
+            echo "${key}=${value}" >> "$GITHUB_ENV"
+
+            # Mask if requested
+            if [ "$MASK" = "true" ]; then
+              echo "::add-mask::${value}"
+            fi
+
+            COUNT=$((COUNT + 1))
+          fi
+        done < "$ENV_FILE"
+
+        echo "env_count=${COUNT}" >> "$GITHUB_OUTPUT"
+        echo "pull_method=relay" >> "$GITHUB_OUTPUT"
+        echo "✓ Injected ${COUNT} environment variables"
+
+    - name: Cleanup
+      shell: bash
+      if: always()
+      run: |
+        rm -f /tmp/envsync-service-key
+        rm -f "${{ inputs.env_file }}"

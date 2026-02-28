@@ -1,0 +1,215 @@
+package sync
+
+import (
+	"context"
+	"crypto/sha256"
+	"fmt"
+	"net"
+	"os"
+
+	"github.com/envsync/envsync/internal/config"
+	"github.com/envsync/envsync/internal/crypto"
+	"github.com/envsync/envsync/internal/envfile"
+	"github.com/envsync/envsync/internal/peer"
+	"github.com/envsync/envsync/internal/transport"
+	"github.com/flynn/noise"
+)
+
+// PullOptions configures a pull operation.
+type PullOptions struct {
+	// EnvFilePath is where to write the received .env file.
+	EnvFilePath string
+
+	// Port to listen on for incoming connections.
+	Port int
+
+	// KeyPair is the local identity.
+	KeyPair *crypto.KeyPair
+
+	// NoiseKeypair derived from KeyPair.
+	NoiseKeypair noise.DHKey
+
+	// ConfirmBeforeApply prompts before overwriting.
+	ConfirmBeforeApply bool
+
+	// OnListening is called when the listener is ready.
+	OnListening func(port int)
+
+	// OnReceived is called when data is received and verified.
+	OnReceived func(payload EnvPayload, diff *envfile.DiffResult)
+
+	// OnConfirm is called to ask for user confirmation. Return true to apply.
+	OnConfirm func(diff *envfile.DiffResult) bool
+
+	// OnApplied is called after the file is written.
+	OnApplied func(fileName string)
+}
+
+// PullResult summarizes the pull operation.
+type PullResult struct {
+	FileName    string
+	FileSize    int
+	VarCount    int
+	Applied     bool
+	DiffSummary string
+}
+
+// Pull listens for an incoming push and applies the received .env file.
+func Pull(ctx context.Context, opts PullOptions) (*PullResult, error) {
+	port := opts.Port
+	if port == 0 {
+		port = config.DefaultPort
+	}
+
+	result := &PullResult{}
+
+	// Start listener
+	listener, err := transport.Listen(transport.ListenerOptions{
+		Port:         port,
+		LocalKeypair: opts.NoiseKeypair,
+		VerifyPeer: func(publicKey []byte) error {
+			// Verify against trust registry — reject revoked peers
+			if len(publicKey) != 32 {
+				return fmt.Errorf("invalid public key length: %d", len(publicKey))
+			}
+			var pk [32]byte
+			copy(pk[:], publicKey)
+			fp := crypto.ComputeFingerprint(pk)
+
+			// Load registry and check trust across all teams
+			reg, err := peer.NewRegistry()
+			if err != nil {
+				// If registry can't be loaded, allow (first use)
+				return nil
+			}
+
+			teams, err := reg.ListTeams()
+			if err != nil || len(teams) == 0 {
+				// No teams yet — TOFU: accept first connection
+				return nil
+			}
+
+			// Search all teams for this peer
+			for _, teamID := range teams {
+				p, err := reg.LoadPeer(teamID, fp)
+				if err == nil {
+					if !p.CanSync() {
+						return fmt.Errorf("peer %s is not trusted (status: %s)", fp[:12], p.Trust)
+					}
+					return nil // Found and trusted
+				}
+			}
+
+			// Unknown peer — TOFU: allow but they're not registered yet
+			return nil
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("starting listener: %w", err)
+	}
+	defer listener.Close()
+
+	if opts.OnListening != nil {
+		addr := listener.Addr()
+		if tcpAddr, ok := addr.(*net.TCPAddr); ok {
+			opts.OnListening(tcpAddr.Port)
+		} else {
+			opts.OnListening(port)
+		}
+	}
+
+	// Wait for a connection
+	conn, err := listener.Accept(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("waiting for connection: %w", err)
+	}
+	defer conn.Close()
+
+	// Receive message
+	msg, err := ReceiveMessage(conn)
+	if err != nil {
+		return nil, fmt.Errorf("receiving message: %w", err)
+	}
+
+	if msg.Type != MsgEnvPush {
+		// Send NACK
+		SendMessage(conn, Message{Type: MsgNack, Payload: []byte("expected ENV_PUSH")})
+		return nil, fmt.Errorf("unexpected message type: 0x%02x", msg.Type)
+	}
+
+	// Decode payload
+	payload, err := DecodeEnvPayload(msg.Payload)
+	if err != nil {
+		SendMessage(conn, Message{Type: MsgNack, Payload: []byte("invalid payload")})
+		return nil, fmt.Errorf("decoding payload: %w", err)
+	}
+
+	// Verify checksum
+	actualChecksum := sha256.Sum256(payload.Data)
+	if actualChecksum != payload.Checksum {
+		SendMessage(conn, Message{Type: MsgNack, Payload: []byte("checksum mismatch")})
+		return nil, fmt.Errorf("data checksum mismatch — possible corruption")
+	}
+
+	result.FileName = payload.FileName
+	result.FileSize = len(payload.Data)
+
+	// Parse received env
+	receivedEnv, err := envfile.Parse(string(payload.Data))
+	if err != nil {
+		SendMessage(conn, Message{Type: MsgNack, Payload: []byte("invalid .env format")})
+		return nil, fmt.Errorf("parsing received .env: %w", err)
+	}
+	result.VarCount = receivedEnv.VariableCount()
+
+	// Compute diff against local file
+	envPath := opts.EnvFilePath
+	if envPath == "" {
+		envPath = ".env"
+	}
+
+	var diff *envfile.DiffResult
+	localData, err := os.ReadFile(envPath)
+	if err == nil {
+		localEnv, parseErr := envfile.Parse(string(localData))
+		if parseErr == nil {
+			diff = envfile.Diff(localEnv, receivedEnv)
+		}
+	}
+	// If local file doesn't exist, all vars are "added"
+
+	if opts.OnReceived != nil {
+		opts.OnReceived(payload, diff)
+	}
+
+	if diff != nil {
+		result.DiffSummary = diff.Summary()
+	}
+
+	// Confirm before apply
+	if opts.ConfirmBeforeApply && diff != nil && diff.HasChanges() {
+		if opts.OnConfirm != nil {
+			if !opts.OnConfirm(diff) {
+				SendMessage(conn, Message{Type: MsgNack, Payload: []byte("user rejected changes")})
+				result.Applied = false
+				return result, nil
+			}
+		}
+	}
+
+	// Write the file
+	if err := os.WriteFile(envPath, payload.Data, 0600); err != nil {
+		SendMessage(conn, Message{Type: MsgNack, Payload: []byte("failed to write file")})
+		return nil, fmt.Errorf("writing %s: %w", envPath, err)
+	}
+
+	// Send ACK
+	SendMessage(conn, Message{Type: MsgAck})
+
+	result.Applied = true
+	if opts.OnApplied != nil {
+		opts.OnApplied(envPath)
+	}
+
+	return result, nil
+}
