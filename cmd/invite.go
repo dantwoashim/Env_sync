@@ -9,9 +9,12 @@ import (
 	"time"
 
 	"github.com/envsync/envsync/internal/audit"
+	"github.com/envsync/envsync/internal/config"
+	"github.com/envsync/envsync/internal/discovery"
 	"github.com/envsync/envsync/internal/peer"
 	"github.com/envsync/envsync/internal/relay"
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/ssh"
 )
 
 var inviteCmd = &cobra.Command{
@@ -46,15 +49,25 @@ func runInvite(cmd *cobra.Command, args []string) error {
 	// Create team ID from fingerprint + project
 	teamID := generateTeamID(kp.Fingerprint)
 
+	// Fetch invitee's GitHub SSH keys to get their expected fingerprint
+	inviteeFP := ""
+	if cacheDir, dirErr := config.DataDir(); dirErr == nil {
+		ghCache := discovery.NewGitHubKeyCache(cacheDir)
+		ghKeys, ghErr := ghCache.FetchEd25519Keys(username)
+		if ghErr == nil && len(ghKeys) > 0 {
+			inviteeFP = ssh.FingerprintSHA256(ghKeys[0])
+		}
+	}
+
 	// Create invite on relay
 	client := relay.NewClient(cfg.Relay.URL, kp)
 	err = client.CreateInvite(relay.InviteRequest{
-		TokenHash:          tokenHash,
-		TeamID:             teamID,
-		Inviter:            cfg.Identity.GitHubUsername,
-		InviterFingerprint: kp.Fingerprint,
-		Invitee:            username,
-		ExpectedFingerprint: "", // Will be filled when we fetch GitHub keys
+		TokenHash:           tokenHash,
+		TeamID:              teamID,
+		Inviter:             cfg.Identity.GitHubUsername,
+		InviterFingerprint:  kp.Fingerprint,
+		Invitee:             username,
+		ExpectedFingerprint: inviteeFP,
 	})
 	if err != nil {
 		// Relay might not be available — create local invite anyway

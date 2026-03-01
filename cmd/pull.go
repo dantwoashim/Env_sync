@@ -9,6 +9,7 @@ import (
 	"github.com/envsync/envsync/internal/config"
 	"github.com/envsync/envsync/internal/crypto"
 	"github.com/envsync/envsync/internal/envfile"
+	"github.com/envsync/envsync/internal/peer"
 	"github.com/envsync/envsync/internal/relay"
 	envsync "github.com/envsync/envsync/internal/sync"
 	"github.com/envsync/envsync/internal/ui"
@@ -45,7 +46,14 @@ func runPull(cmd *cobra.Command, args []string) error {
 
 	// Phase 1: Check relay for pending blobs
 	relayClient := relay.NewClient(cfg.Relay.URL, kp)
-	teamID := generateTeamID(kp.Fingerprint)
+
+	// Prefer team ID from project config (.envsync.toml), fallback to derived
+	teamID := ""
+	if pc, pcErr := peer.LoadProjectConfig(); pcErr == nil && pc.TeamID != "" {
+		teamID = pc.TeamID
+	} else {
+		teamID = generateTeamID(kp.Fingerprint)
+	}
 
 	ui.Line("  Checking relay for pending blobs...")
 	pending, relayErr := relayClient.ListPending(teamID)

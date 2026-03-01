@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -56,10 +57,13 @@ func (sc *SignalClient) ExchangeEndpoints(localEndpoint PeerEndpoint, timeout ti
 // pollForPeer uses HTTP to register and poll for a peer's endpoint.
 func (sc *SignalClient) pollForPeer(localEndpoint PeerEndpoint, timeout time.Duration) (*PeerEndpoint, error) {
 	// Register our endpoint
-	data, _ := json.Marshal(localEndpoint)
+	data, err := json.Marshal(localEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling endpoint: %w", err)
+	}
 	url := fmt.Sprintf("%s/signal/%s/register", sc.baseURL, sc.teamID)
 
-	req, err := http.NewRequest("PUT", url, nil)
+	req, err := http.NewRequest("PUT", url, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +76,6 @@ func (sc *SignalClient) pollForPeer(localEndpoint PeerEndpoint, timeout time.Dur
 		return nil, fmt.Errorf("registering endpoint: %w", err)
 	}
 	resp.Body.Close()
-	_ = data // Used in registration body in full implementation
 
 	// Poll for peer
 	deadline := time.Now().Add(timeout)

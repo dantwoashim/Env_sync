@@ -6,6 +6,7 @@ import (
 
 	"github.com/envsync/envsync/internal/audit"
 	"github.com/envsync/envsync/internal/crypto"
+	"github.com/envsync/envsync/internal/peer"
 	"github.com/envsync/envsync/internal/relay"
 	"github.com/envsync/envsync/internal/store"
 	envsync "github.com/envsync/envsync/internal/sync"
@@ -44,7 +45,14 @@ func runPush(cmd *cobra.Command, args []string) error {
 
 	// Create relay client for fallback
 	relayClient := relay.NewClient(cfg.Relay.URL, kp)
-	teamID := generateTeamID(kp.Fingerprint)
+
+	// Prefer team ID from project config (.envsync.toml), fallback to derived
+	teamID := ""
+	if pc, pcErr := peer.LoadProjectConfig(); pcErr == nil && pc.TeamID != "" {
+		teamID = pc.TeamID
+	} else {
+		teamID = generateTeamID(kp.Fingerprint)
+	}
 
 	ui.Header("EnvSync Push")
 
