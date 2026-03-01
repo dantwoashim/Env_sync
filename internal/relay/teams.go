@@ -1,3 +1,5 @@
+// Copyright (c) EnvSync Contributors. SPDX-License-Identifier: MIT
+
 package relay
 
 // This file re-exports blob operations from the Client.

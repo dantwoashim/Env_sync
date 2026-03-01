@@ -1,3 +1,5 @@
+// Copyright (c) EnvSync Contributors. SPDX-License-Identifier: MIT
+
 package relay
 
 // This file re-exports invite operations from the Client.

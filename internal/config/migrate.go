@@ -1,3 +1,5 @@
+// Copyright (c) EnvSync Contributors. SPDX-License-Identifier: MIT
+
 package config
 
 import (

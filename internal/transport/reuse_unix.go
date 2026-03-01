@@ -1,3 +1,5 @@
+// Copyright (c) EnvSync Contributors. SPDX-License-Identifier: MIT
+
 //go:build !windows
 
 package transport

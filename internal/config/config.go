@@ -1,3 +1,5 @@
+// Copyright (c) EnvSync Contributors. SPDX-License-Identifier: MIT
+
 package config
 
 import (
@@ -5,7 +7,52 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/pelletier/go-toml/v2"
 )
+
+// Load reads the config file from the config directory.
+// If the file does not exist, it returns Default() config.
+func Load() (*Config, error) {
+	configDir, err := ConfigDir()
+	if err != nil {
+		return Default(), nil
+	}
+
+	path := filepath.Join(configDir, "config.toml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Default(), nil
+		}
+		return nil, fmt.Errorf("reading config: %w", err)
+	}
+
+	cfg := Default()
+	if err := toml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+	return cfg, nil
+}
+
+// Save writes the config to the config directory.
+func Save(cfg *Config) error {
+	configDir, err := ConfigDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		return fmt.Errorf("creating config directory: %w", err)
+	}
+
+	data, err := toml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+
+	path := filepath.Join(configDir, "config.toml")
+	return os.WriteFile(path, data, 0600)
+}
 
 // DefaultPort is the default TCP port for EnvSync connections.
 const DefaultPort = 7733

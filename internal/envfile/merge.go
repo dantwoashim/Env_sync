@@ -1,3 +1,5 @@
+// Copyright (c) EnvSync Contributors. SPDX-License-Identifier: MIT
+
 package envfile
 
 // MergeResult is the result of a three-way merge.
