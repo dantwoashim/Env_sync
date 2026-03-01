@@ -91,10 +91,13 @@ async function authMiddleware(c: any, next: any) {
             }
             // If no public key found, allow through (TOFU — first contact)
             // The fingerprint is still stored for audit and rate-limiting
+        } else {
+            // KV binding unavailable — fail closed, do not silently allow
+            return c.json({ error: 'service_unavailable', message: 'Auth backend unavailable' }, 503);
         }
     } catch {
-        // If verification infrastructure isn't available, fall through
-        // but still enforce header format and timestamp
+        // Verification infrastructure failure — fail closed
+        return c.json({ error: 'service_unavailable', message: 'Signature verification failed' }, 503);
     }
 
     // Store parsed auth info for route handlers

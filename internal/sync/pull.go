@@ -103,8 +103,8 @@ func Pull(ctx context.Context, opts PullOptions) (*PullResult, error) {
 				}
 			}
 
-			// Unknown peer — TOFU: allow but they're not registered yet
-			return nil
+			// Unknown peer — reject: they must be invited first
+			return fmt.Errorf("unknown peer %s — use 'envsync invite @username' to add them", fp[:12])
 		},
 	})
 	if err != nil {

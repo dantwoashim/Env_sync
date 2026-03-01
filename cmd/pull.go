@@ -65,7 +65,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 		for _, blob := range pending {
 			ui.Line(fmt.Sprintf("  ▸ Downloading %s from %s...", blob.Filename, shortFP(blob.SenderFingerprint)))
 
-			data, _, ephKeyB64, err := relayClient.DownloadBlob(teamID, blob.BlobID)
+			data, ephKeyB64, _, err := relayClient.DownloadBlob(teamID, blob.BlobID)
 			if err != nil {
 				ui.Warning(fmt.Sprintf("  Download failed: %s", err))
 				continue

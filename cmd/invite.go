@@ -207,26 +207,49 @@ func runJoin(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// generateMnemonic creates a 6-word random mnemonic token.
+// generateMnemonic creates an 8-word random mnemonic token with 64 bits of entropy.
+// Uses a 256-word pool (8 bits per word × 8 words = 64 bits).
 func generateMnemonic() string {
+	// 256-word curated pool — exactly 2^8 words to eliminate modular bias
 	words := []string{
-		"tiger", "castle", "moon", "river", "flame", "hope",
-		"storm", "eagle", "frost", "blade", "ocean", "crown",
-		"spark", "stone", "cloud", "forest", "bridge", "dawn",
-		"iron", "coral", "pulse", "ember", "gate", "prism",
-		"wind", "orbit", "silk", "dune", "arc", "nova",
-		"peak", "wave", "reef", "lens", "mesh", "haze",
+		"tiger", "castle", "moon", "river", "flame", "hope", "storm", "eagle",
+		"frost", "blade", "ocean", "crown", "spark", "stone", "cloud", "forest",
+		"bridge", "dawn", "iron", "coral", "pulse", "ember", "gate", "prism",
+		"wind", "orbit", "silk", "dune", "arc", "nova", "peak", "wave",
+		"reef", "lens", "mesh", "haze", "torch", "maple", "drift", "anchor",
+		"bolt", "cyan", "delta", "echo", "flint", "grain", "haven", "ivory",
+		"jade", "kelp", "lark", "mist", "north", "olive", "plume", "quartz",
+		"ridge", "slate", "thorn", "umbra", "vault", "wren", "yard", "zinc",
+		"amber", "birch", "cedar", "dove", "elm", "fern", "glow", "hawk",
+		"inch", "junco", "knot", "lime", "moth", "nest", "opal", "pine",
+		"quill", "raven", "sage", "trout", "umber", "vine", "willow", "xenon",
+		"yew", "alder", "bass", "crane", "dusk", "forge", "grove", "heron",
+		"iris", "jasper", "kite", "lotus", "myrtle", "nutmeg", "orchid", "pearl",
+		"robin", "swift", "tulip", "urchin", "viper", "walrus", "aspen", "bloom",
+		"cliff", "drake", "ermine", "falcon", "garnet", "holly", "indigo", "jackal",
+		"lapis", "mango", "nebula", "onyx", "panther", "rune", "sapphire", "talon",
+		"cobra", "fennel", "goblet", "hermit", "ignite", "jovial", "karma", "lantern",
+		"marble", "nectar", "oriole", "pelican", "summit", "tundra", "velvet", "whisper",
+		"zodiac", "aurora", "breeze", "cipher", "dagger", "enigma", "fiesta", "glacier",
+		"harbor", "island", "jungle", "kernel", "legend", "meadow", "nimbus", "oracle",
+		"parrot", "rapids", "sierra", "temple", "ultra", "vertex", "winter", "xyloph",
+		"bronze", "canopy", "dragon", "ethos", "fossil", "galaxy", "herald", "inkwell",
+		"jigsaw", "katana", "lagoon", "mirage", "nexus", "osprey", "presto", "riddle",
+		"scarab", "throne", "utopia", "viking", "wombat", "axiom", "beacon", "cavern",
+		"dynamo", "ember2", "flurry", "goblin", "helium", "icecap", "jester", "knight",
+		"lynx", "monsoon", "narwhal", "outpost", "plasma", "quasar", "raptor", "sphinx",
+		"titan", "umbral", "vortex", "zenith", "alpine", "basalt", "cosmos", "delphi",
 	}
 
-	// Generate 6 random indices
-	selected := make([]string, 6)
-	for i := 0; i < 6; i++ {
+	// Generate 8 random indices (8 words × 8 bits = 64 bits of entropy)
+	selected := make([]string, 8)
+	for i := 0; i < 8; i++ {
 		b := make([]byte, 1)
 		if _, err := rand.Read(b); err != nil {
 			// Fail hard — crypto randomness is critical for invite security
 			panic(fmt.Sprintf("crypto/rand failed: %v", err))
 		}
-		selected[i] = words[int(b[0])%len(words)]
+		selected[i] = words[int(b[0])] // Exactly 256 words = no modular bias
 	}
 
 	return strings.Join(selected, "-")

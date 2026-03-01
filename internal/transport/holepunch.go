@@ -20,6 +20,7 @@ type HolePunchOptions struct {
 	KeyPair      *crypto.KeyPair
 	LocalPort    int
 	Timeout      time.Duration
+	VerifyPeer   func(publicKey []byte) error // Peer verification callback
 }
 
 // HolePunch attempts to establish a direct TCP connection through NAT.
@@ -44,7 +45,6 @@ func HolePunch(ctx context.Context, opts HolePunchOptions) (*crypto.SecureConn, 
 		localEndpoint.NATType = stunResult.NATType.String()
 
 		// If our NAT is symmetric, hole-punching will almost certainly fail.
-		// Signal our NAT type so the peer knows, but still try.
 		if stunResult.NATType == NATSymmetric {
 			return nil, fmt.Errorf("symmetric NAT detected — hole-punch unlikely to succeed, use relay")
 		}
@@ -128,6 +128,7 @@ connected:
 	secureConn, err := crypto.PerformHandshake(rawConn, crypto.NoiseConfig{
 		StaticKeypair: opts.LocalKeypair,
 		IsInitiator:   true,
+		VerifyPeer:    opts.VerifyPeer,
 	})
 	if err != nil {
 		rawConn.Close()
