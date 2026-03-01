@@ -146,5 +146,5 @@ func SaveProjectConfig(pc *ProjectConfig) error {
 	if err != nil {
 		return fmt.Errorf("encoding project config: %w", err)
 	}
-	return os.WriteFile(config.ProjectConfigPath(), data, 0644)
+	return os.WriteFile(config.ProjectConfigPath(), data, 0600)
 }

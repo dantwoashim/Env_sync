@@ -31,7 +31,11 @@ export async function rateLimitMiddleware(c: Context<{ Bindings: Env }>, next: N
 
         await kv.put(key, String(count + 1), { expirationTtl: 120 });
     } catch {
-        // If KV is unavailable, allow the request
+        // KV unavailable — fail closed to prevent abuse during outages
+        return c.json({
+            error: 'service_unavailable',
+            message: 'Rate limiting backend unavailable. Try again shortly.',
+        }, 503);
     }
 
     // Set rate limit headers
@@ -60,6 +64,7 @@ export async function teamRateLimitMiddleware(teamID: string, c: Context<{ Bindi
         await kv.put(key, String(count + 1), { expirationTtl: 86400 });
         return { limited: false, count: count + 1, limit: dailyLimit };
     } catch {
-        return { limited: false, count: 0, limit: 200 };
+        // KV unavailable — fail closed
+        return { limited: true, count: 0, limit: 0 };
     }
 }

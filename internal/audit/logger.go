@@ -3,6 +3,9 @@
 package audit
 
 import (
+	"crypto/hmac"
+	cryptosha256 "crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -27,7 +30,7 @@ const (
 	EventRestore          EventType = "restore"
 )
 
-// Entry is a single audit log entry.
+// Entry is a single audit log entry with tamper-evident chaining.
 type Entry struct {
 	Timestamp   time.Time `json:"timestamp"`
 	Event       EventType `json:"event"`
@@ -36,12 +39,15 @@ type Entry struct {
 	VarsChanged int       `json:"vars_changed,omitempty"`
 	Method      string    `json:"method,omitempty"`
 	Details     string    `json:"details,omitempty"`
+	PrevHash    string    `json:"prev_hash,omitempty"`
+	HMAC        string    `json:"hmac,omitempty"`
 }
 
-// Logger is an append-only audit log.
+// Logger is an append-only, tamper-evident audit log.
 type Logger struct {
-	mu   sync.Mutex
-	path string
+	mu       sync.Mutex
+	path     string
+	lastHash string // SHA-256 of the previous entry for chaining
 }
 
 // NewLogger creates a new audit logger.
@@ -60,7 +66,7 @@ func NewLogger() (*Logger, error) {
 	}, nil
 }
 
-// Log appends an event to the audit log.
+// Log appends a tamper-evident event to the audit log.
 func (l *Logger) Log(entry Entry) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -69,10 +75,32 @@ func (l *Logger) Log(entry Entry) error {
 		entry.Timestamp = time.Now()
 	}
 
+	// Chain: include hash of previous entry
+	entry.PrevHash = l.lastHash
+
+	// Compute HMAC over entry content (minus HMAC field itself)
+	entry.HMAC = "" // Clear before computing
+	entryBytes, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("marshaling audit entry: %w", err)
+	}
+
+	// Use machine-specific key derived from hostname
+	host, _ := os.Hostname()
+	key := cryptosha256.Sum256([]byte("envsync-audit-" + host))
+	mac := hmac.New(cryptosha256.New, key[:])
+	mac.Write(entryBytes)
+	entry.HMAC = hex.EncodeToString(mac.Sum(nil))
+
+	// Serialize final entry with HMAC
 	data, err := json.Marshal(entry)
 	if err != nil {
 		return fmt.Errorf("marshaling audit entry: %w", err)
 	}
+
+	// Update chain hash
+	h := cryptosha256.Sum256(data)
+	l.lastHash = hex.EncodeToString(h[:])
 
 	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {

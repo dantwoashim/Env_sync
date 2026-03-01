@@ -5,9 +5,12 @@ package sync
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/envsync/envsync/internal/config"
@@ -154,10 +157,12 @@ func Pull(ctx context.Context, opts PullOptions) (*PullResult, error) {
 		return nil, fmt.Errorf("data checksum mismatch — possible corruption")
 	}
 
-	// Validate sequence: reject replays (sequence must be > last known)
-	if payload.Sequence <= 0 {
-		SendMessage(conn, Message{Type: MsgNack, Payload: []byte("invalid sequence number")})
-		return nil, fmt.Errorf("invalid sequence number: %d", payload.Sequence)
+	// Validate sequence: reject replays (sequence must be > last known for this peer)
+	peerFP := conn.RemotePublicKey()
+	lastSeq := loadLastSequence(peerFP)
+	if payload.Sequence <= lastSeq {
+		SendMessage(conn, Message{Type: MsgNack, Payload: []byte("replayed sequence number")})
+		return nil, fmt.Errorf("replay detected: sequence %d ≤ last seen %d from peer", payload.Sequence, lastSeq)
 	}
 
 	// Validate timestamp: reject payloads older than 72 hours
@@ -229,9 +234,43 @@ func Pull(ctx context.Context, opts PullOptions) (*PullResult, error) {
 	SendMessage(conn, Message{Type: MsgAck})
 
 	result.Applied = true
+
+	// Persist the sequence number for this peer to prevent future replays
+	saveLastSequence(peerFP, payload.Sequence)
+
 	if opts.OnApplied != nil {
 		opts.OnApplied(envPath)
 	}
 
 	return result, nil
+}
+
+// loadLastSequence reads the last-seen sequence number for a peer from disk.
+func loadLastSequence(peerPK []byte) int64 {
+	dataDir, err := config.DataDir()
+	if err != nil {
+		return 0
+	}
+	path := filepath.Join(dataDir, "sequences", hex.EncodeToString(peerPK)+".seq")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	seq, err := strconv.ParseInt(string(data), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return seq
+}
+
+// saveLastSequence persists the last-seen sequence number for a peer to disk.
+func saveLastSequence(peerPK []byte, seq int64) {
+	dataDir, err := config.DataDir()
+	if err != nil {
+		return
+	}
+	dir := filepath.Join(dataDir, "sequences")
+	os.MkdirAll(dir, 0700)
+	path := filepath.Join(dir, hex.EncodeToString(peerPK)+".seq")
+	os.WriteFile(path, []byte(strconv.FormatInt(seq, 10)), 0600)
 }
