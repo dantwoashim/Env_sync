@@ -152,7 +152,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 			Cause:      err.Error(),
 			Suggestion: "Ensure the sender is running 'envsync push'",
 		})
-		return nil
+		return err
 	}
 
 	// Audit log

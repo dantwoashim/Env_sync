@@ -33,7 +33,7 @@ func runBackup(cmd *cobra.Command, args []string) error {
 	data, err := os.ReadFile(targetFile)
 	if err != nil {
 		ui.RenderError(ui.ErrEnvFileNotFound(targetFile))
-		return nil
+		return fmt.Errorf("file not found: %s", targetFile)
 	}
 
 	// Derive encryption key

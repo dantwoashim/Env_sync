@@ -35,7 +35,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	currentData, err := os.ReadFile(targetFile)
 	if err != nil {
 		ui.RenderError(ui.ErrEnvFileNotFound(targetFile))
-		return nil
+		return fmt.Errorf("file not found: %s", targetFile)
 	}
 
 	currentEnv, err := envfile.Parse(string(currentData))
@@ -62,7 +62,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 				Cause:      err.Error(),
 				Suggestion: "Check the file path",
 			})
-			return nil
+			return err
 		}
 
 		compareEnv, err = envfile.Parse(string(compareData))

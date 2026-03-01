@@ -163,17 +163,9 @@ func (c *Client) GetInvite(tokenHash string) (*InviteResponse, error) {
 	return &invite, nil
 }
 
-// ConsumeInvite consumes (redeems) an invite.
+// ConsumeInvite consumes (redeems) an invite via doRequest for retry + signing.
 func (c *Client) ConsumeInvite(tokenHash string) (*InviteResponse, error) {
-	req, err := http.NewRequest("DELETE", c.baseURL+"/invites/"+tokenHash, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("X-EnvSync-Fingerprint", c.fingerprint)
-	authHeader := crypto.SignRequest(c.privateKey, c.fingerprint, "DELETE", "/invites/"+tokenHash, []byte{})
-	req.Header.Set("Authorization", authHeader)
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doRequest("DELETE", "/invites/"+tokenHash, nil)
 	if err != nil {
 		return nil, err
 	}

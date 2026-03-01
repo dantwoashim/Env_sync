@@ -4,6 +4,7 @@ package audit
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	cryptosha256 "crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -104,10 +105,9 @@ func (l *Logger) Log(entry Entry) error {
 		return fmt.Errorf("marshaling audit entry: %w", err)
 	}
 
-	// Use machine-specific key derived from hostname
-	host, _ := os.Hostname()
-	key := cryptosha256.Sum256([]byte("envsync-audit-" + host))
-	mac := hmac.New(cryptosha256.New, key[:])
+	// Derive HMAC key from a persistent secret stored alongside the audit log
+	hmacKey := loadOrCreateAuditKey(l.path)
+	mac := hmac.New(cryptosha256.New, hmacKey)
 	mac.Write(entryBytes)
 	entry.HMAC = hex.EncodeToString(mac.Sum(nil))
 
@@ -221,4 +221,25 @@ func splitLines(data []byte) [][]byte {
 		lines = append(lines, data[start:])
 	}
 	return lines
+}
+
+// loadOrCreateAuditKey returns a persistent 32-byte HMAC key.
+// If the key file doesn't exist, it creates one with crypto/rand.
+func loadOrCreateAuditKey(auditPath string) []byte {
+	keyPath := auditPath + ".key"
+	data, err := os.ReadFile(keyPath)
+	if err == nil && len(data) == 32 {
+		return data
+	}
+
+	// Generate new key
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		// Fallback: derive from audit path (better than hostname)
+		h := cryptosha256.Sum256([]byte(auditPath))
+		return h[:]
+	}
+
+	_ = os.WriteFile(keyPath, key, 0600)
+	return key
 }

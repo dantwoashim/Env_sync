@@ -5,6 +5,8 @@ package store
 import (
 	"fmt"
 	"sort"
+
+	"github.com/envsync/envsync/internal/envfile"
 )
 
 // History provides version listing, comparison, and restoration metadata.
@@ -91,39 +93,19 @@ func (h *History) Compare(projectHash string, fromSeq, toSeq int, key [32]byte) 
 	return diff, nil
 }
 
-// countVariables parses raw .env bytes into key=value pairs.
+// countVariables parses raw .env bytes using the proper envfile parser.
+// Replaces the previous hand-rolled parser that didn't handle quoting,
+// multiline values, escape sequences, or export prefixes.
 func countVariables(data []byte) map[string]string {
-	vars := make(map[string]string)
-	s := string(data)
-	start := 0
-	for i := 0; i <= len(s); i++ {
-		if i == len(s) || s[i] == '\n' {
-			line := s[start:i]
-			if len(line) > 0 && line[len(line)-1] == '\r' {
-				line = line[:len(line)-1]
-			}
-			start = i + 1
-
-			// Trim whitespace
-			j := 0
-			for j < len(line) && (line[j] == ' ' || line[j] == '\t') {
-				j++
-			}
-			line = line[j:]
-
-			if line == "" || line[0] == '#' {
-				continue
-			}
-
-			for k := 0; k < len(line); k++ {
-				if line[k] == '=' {
-					key := line[:k]
-					val := line[k+1:]
-					vars[key] = val
-					break
-				}
-			}
+	env, err := envfile.Parse(string(data))
+	if err != nil {
+		return make(map[string]string)
+	}
+	result := make(map[string]string)
+	for _, e := range env.Entries {
+		if e.Type == envfile.EntryKeyValue {
+			result[e.Key] = e.Value
 		}
 	}
-	return vars
+	return result
 }

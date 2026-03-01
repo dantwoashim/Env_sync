@@ -78,7 +78,7 @@ func runServiceKeyExport(cmd *cobra.Command, args []string) error {
 			Cause:      fmt.Sprintf("Expected key at %s", keyPath),
 			Suggestion: "Run 'envsync service-key generate' first",
 		})
-		return nil
+		return err
 	}
 
 	pubKeyB64 := base64.StdEncoding.EncodeToString(sk.PublicKey)

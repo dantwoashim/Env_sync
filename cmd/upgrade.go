@@ -39,7 +39,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	status, err := client.GetTierStatus(teamID)
 	if err != nil {
 		ui.RenderError(ui.ErrRelayUnavailable(err.Error()))
-		return nil
+		return err
 	}
 
 	ui.Header("EnvSync Plan")
